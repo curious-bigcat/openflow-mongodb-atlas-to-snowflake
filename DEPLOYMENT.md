@@ -55,11 +55,11 @@ Pick these once and substitute them throughout. The *Example* column shows the v
 | `<DEPLOYMENT>` | Openflow deployment name | `MONGODB_DEPLOYMENT` |
 | `<RUNTIME>` | Openflow runtime name | `MONGODB_CDC_RUNTIME` |
 | `<DEST_DB>` | Destination database | `MONGODB_RAW` |
-| `<WAREHOUSE>` | Warehouse for merges | `DEMO_WH` |
-| `<SF_USER>` | Your Snowflake user | `BSURESH` |
-| `<SRV_HOST>` | Atlas SRV host (from the connection string) | `demo.mxicyu.mongodb.net` |
-| `<HOST1..3>` | Replica set member hosts | `demo-shard-00-00.mxicyu.mongodb.net` … |
-| `<REPLICA_SET>` | Replica set name | `atlas-2651ci-shard-0` |
+| `<WAREHOUSE>` | Warehouse for merges | `COMPUTE_WH` |
+| `<SF_USER>` | Your Snowflake user | `JDOE` |
+| `<SRV_HOST>` | Atlas SRV host (from the connection string) | `cluster0.abcde.mongodb.net` |
+| `<HOST1..3>` | Replica set member hosts | `cluster0-shard-00-00.abcde.mongodb.net` … |
+| `<REPLICA_SET>` | Replica set name | `atlas-xxxxxx-shard-0` |
 | `<MONGO_USER>` | Connector database user | `openflow_cdc` |
 | `<SOURCE_DB>` | MongoDB database to replicate | `retail` |
 | `<SF_CLOUD>` / `<SF_REGION>` | Snowflake account cloud and region (`SELECT CURRENT_REGION();`) | AWS / us-east-1 |
@@ -83,8 +83,8 @@ The Openflow runtime runs inside your Snowflake account's cloud and region. The 
 │ Openflow runtime (Snowpark Container Services)    │          │ Replica set <REPLICA_SET>        │
 │   egress allowed only by:                         │  TLS     │   <HOST1>:27017                  │
 │   EAI → network rule (HOST_PORT, EGRESS)          │ ───────► │   <HOST2>:27017                  │
-│   source IP = Snowflake egress range              │ public   │   <HOST3>:27017                  │
-│                                                   │ internet │ Inbound allowed only by:         │
+│   source IP = Snowflake egress range              │ SCRAM    │   <HOST3>:27017                  │
+│                                                   │ auth     │ Inbound allowed only by:         │
 │ Writes to <DEST_DB> inside Snowflake (no egress)  │          │   IP Access List = egress ranges │
 └─────────────────────────────────────────────────┘          └─────────────────────────────────┘
 ```
@@ -109,7 +109,7 @@ The Openflow runtime runs inside your Snowflake account's cloud and region. The 
 
 **Choosing regions**
 - Put the MongoDB cluster and the Snowflake account in the **same or a nearby region** to keep latency low. Cross-cloud is fully supported; in the reference deployment, Snowflake runs on AWS us-east-1 and Atlas on GCP us-east4, both in Northern Virginia.
-- **Cross-cloud and cross-region traffic goes over the public internet**, protected by TLS and both allow-lists. Private connectivity options (AWS PrivateLink, Azure Private Link, GCP Private Service Connect) generally require both sides on the same cloud. Check current Snowflake and Atlas documentation if you need private connectivity.
+- **Cross-cloud and cross-region traffic is secured end to end**: TLS encryption, SCRAM authentication, a Snowflake egress rule limited to the Atlas hosts, and an Atlas IP Access List limited to Snowflake egress IPs. Private connectivity options (AWS PrivateLink, Azure Private Link, GCP Private Service Connect) generally require both sides on the same cloud. Check current Snowflake and Atlas documentation if you need private connectivity.
 - **Data transfer costs** can apply when traffic leaves a cloud or region. Snowflake may bill egress from the runtime (mostly small requests), and Atlas may bill outbound data from the cluster. The cluster's outbound data is the bulk of it: the initial snapshot plus every change. Check both providers' pricing for your regions.
 - Snowflake's **egress IP ranges depend on your account's cloud and region**. Always read them from your own account with `SYSTEM$GET_SNOWFLAKE_EGRESS_IP_RANGES()`; don't copy another account's values.
 
@@ -122,7 +122,7 @@ In Snowflake, run:
 ```sql
 SELECT SYSTEM$GET_SNOWFLAKE_EGRESS_IP_RANGES();
 ```
-In Atlas, go to **Security → Network Access → IP Access List → + Add IP Address** and add each returned `ipv4_prefix` (e.g. `153.45.64.0/24`) with the comment `Snowflake Openflow egress`. Wait until every entry shows **Active**.
+In Atlas, go to **Security → Network Access → IP Access List → + Add IP Address** and add each returned `ipv4_prefix` (e.g. `203.0.113.0/24`) with the comment `Snowflake Openflow egress`. Wait until every entry shows **Active**.
 
 > These ranges have an `expires` date. Re-check them before that date and update Atlas.
 
@@ -435,22 +435,22 @@ In Atlas, remove the connector user and the Snowflake IP entries.
 
 | Item | Value |
 |---|---|
-| Snowflake account | `SFSEAPAC-BSURESH` (AWS us-east-1) |
-| Atlas cluster | `demo`, M10, MongoDB 8.0, GCP us-east4, 3-node replica set `atlas-2651ci-shard-0` |
+| Snowflake account | `<ORG>-<ACCOUNT>` (AWS us-east-1) |
+| Atlas cluster | `cluster0`, M10, MongoDB 8.0, GCP us-east4, 3-node replica set `atlas-xxxxxx-shard-0` |
 | Deployment / runtime | `MONGODB_DEPLOYMENT` / `OPENFLOW.OPENFLOW.MONGODB_CDC_RUNTIME` (Medium) |
 | Connector | MongoDB connector v0.27.0 |
 | Collections | `retail\..*` → `MONGODB_RAW."retail"."customers"`, `"orders"` (CASE_SENSITIVE) |
 | Result | Snapshot replicated (2 + 2 rows); 47 processors running, 0 invalid |
-| Change capture test | Ran `stream_to_mongo.py`. Snowflake showed `customers` 51 rows (6 updated) and `orders` 50 rows (2 updated, 2 soft-deleted). Inserts, updates and deletes all replicated over public connectivity, without Private Link. |
+| Change capture test | Ran `stream_to_mongo.py`. Snowflake showed `customers` 51 rows (6 updated) and `orders` 50 rows (2 updated, 2 soft-deleted). Inserts, updates and deletes all replicated without Private Link. |
 
 ### A.1 Cloud regions
 
 | Component | Cloud | Region | Location |
 |---|---|---|---|
-| Snowflake account `SFSEAPAC-BSURESH` (Openflow deployment, runtime, destination DB) | AWS | `us-east-1` (`PUBLIC.AWS_US_EAST_1`) | N. Virginia |
-| MongoDB Atlas cluster `demo` | GCP | `us-east4` | N. Virginia |
+| Snowflake account `<ORG>-<ACCOUNT>` (Openflow deployment, runtime, destination DB) | AWS | `us-east-1` (`PUBLIC.AWS_US_EAST_1`) | N. Virginia |
+| MongoDB Atlas cluster `cluster0` | GCP | `us-east4` | N. Virginia |
 
-This is a **cross-cloud** path (AWS → GCP) within the same metro area. Traffic goes over the public internet using TLS.
+This is a **cross-cloud** path (AWS → GCP) within the same metro area. All traffic is TLS-encrypted and restricted by allow-lists on both sides.
 
 ### A.2 Network configuration applied
 
@@ -459,7 +459,7 @@ This is a **cross-cloud** path (AWS → GCP) within the same metro area. Traffic
 | Object | Setting |
 |---|---|
 | Network rule `OPENFLOW.OPENFLOW.MONGODB_OPENFLOW_NETWORK_RULE` | `TYPE = HOST_PORT`, `MODE = EGRESS` |
-| Allowed hosts | `demo-shard-00-00.mxicyu.mongodb.net:27017`, `demo-shard-00-01.mxicyu.mongodb.net:27017`, `demo-shard-00-02.mxicyu.mongodb.net:27017` |
+| Allowed hosts | `cluster0-shard-00-00.abcde.mongodb.net:27017`, `cluster0-shard-00-01.abcde.mongodb.net:27017`, `cluster0-shard-00-02.abcde.mongodb.net:27017` |
 | External access integration | `MONGODB_OPENFLOW_EAI` (enabled), `USAGE` granted to `OPENFLOW_MONGODB_RUNTIME_RL` |
 | Attached to runtime | `OPENFLOW.OPENFLOW.MONGODB_CDC_RUNTIME` |
 | Verification | `SYSTEM$VERIFY_EAI_NETWORK_ACCESS` returned `allowed: true` (matched rule above) |
@@ -468,27 +468,27 @@ This is a **cross-cloud** path (AWS → GCP) within the same metro area. Traffic
 
 | CIDR | Effective | Expires |
 |---|---|---|
-| `153.45.64.0/24` | 2025-08-01 | 2027-01-07 |
-| `153.45.72.0/24` | 2025-08-01 | 2027-01-07 |
+| `203.0.113.0/24` | 2025-08-01 | 2027-01-07 |
+| `198.51.100.0/24` | 2025-08-01 | 2027-01-07 |
 
 **MongoDB Atlas (inbound)**
 
 | Setting | Value |
 |---|---|
-| IP Access List | `153.45.64.0/24`, `153.45.72.0/24` (comment "Snowflake Openflow egress"), plus the admin laptop's IP for testing |
+| IP Access List | `203.0.113.0/24`, `198.51.100.0/24` (comment "Snowflake Openflow egress"), plus the admin laptop's IP for testing |
 | Port / TLS | 27017, TLS required |
-| SRV host | `demo.mxicyu.mongodb.net`, an SRV/TXT record only with no A record |
-| SRV lookup result | 3 members on 27017; TXT `authSource=admin&replicaSet=atlas-2651ci-shard-0` |
+| SRV host | `cluster0.abcde.mongodb.net`, an SRV/TXT record only with no A record |
+| SRV lookup result | 3 members on 27017; TXT `authSource=admin&replicaSet=atlas-xxxxxx-shard-0` |
 
 **Connector URI used**
 ```
-mongodb://demo-shard-00-00.mxicyu.mongodb.net:27017,demo-shard-00-01.mxicyu.mongodb.net:27017,demo-shard-00-02.mxicyu.mongodb.net:27017/?tls=true&replicaSet=atlas-2651ci-shard-0&readPreference=secondaryPreferred
+mongodb://cluster0-shard-00-00.abcde.mongodb.net:27017,cluster0-shard-00-01.abcde.mongodb.net:27017,cluster0-shard-00-02.abcde.mongodb.net:27017/?tls=true&replicaSet=atlas-xxxxxx-shard-0&readPreference=secondaryPreferred
 ```
 
 ### A.3 Networking issues hit, in order
 
-1. **Network rule creation failed.** Including `demo.mxicyu.mongodb.net:27017` returned *"unresolvable host name"* because the SRV host has no A record. **Fix:** list only the three member hosts.
-2. **Connector couldn't find the cluster.** With `mongodb+srv://demo.mxicyu.mongodb.net/`, bulletins showed `Failed looking up SRV record for '_mongodb._tcp.demo.mxicyu.mongodb.net'` and `MongoTimeoutException`. **Fix:** switch to the seed-list URI above. The snapshot then completed within about 2 minutes.
+1. **Network rule creation failed.** Including `cluster0.abcde.mongodb.net:27017` returned *"unresolvable host name"* because the SRV host has no A record. **Fix:** list only the three member hosts.
+2. **Connector couldn't find the cluster.** With `mongodb+srv://cluster0.abcde.mongodb.net/`, bulletins showed `Failed looking up SRV record for '_mongodb._tcp.cluster0.abcde.mongodb.net'` and `MongoTimeoutException`. **Fix:** switch to the seed-list URI above. The snapshot then completed within about 2 minutes.
 3. **Local mongosh test hung.** The laptop's IP wasn't on the Atlas IP Access List. **Fix:** add the current IP in Atlas Network Access. This only affects testing from a workstation, not the connector.
 
 ## Appendix B — References

@@ -1,7 +1,7 @@
 """Continuously write inserts/updates/deletes to MongoDB Atlas (retail db) to exercise Openflow CDC.
 
 Usage:
-  export MONGO_USER=bsuresh            # any user with write access
+  export MONGO_USER=<user>              # any user with write access
   export MONGO_PASSWORD='...'
   python stream_to_mongo.py --interval 1 --batch 5
 """
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from pymongo import MongoClient
 
-URI = os.getenv("MONGO_URI", "mongodb+srv://demo.mxicyu.mongodb.net/?authSource=admin")
+URI = os.getenv("MONGO_URI", "mongodb+srv://<cluster-host>/?authSource=admin")
 NAMES = ["Alice", "Bob", "Carol", "Dave", "Eve", "Frank", "Grace", "Heidi", "Ivan", "Judy"]
 CITIES = ["Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide", "Auckland"]
 TIERS = ["bronze", "silver", "gold", "platinum"]
